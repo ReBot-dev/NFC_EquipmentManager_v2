@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Equipment Manager</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<!--
+    各画面は <section> タグで区切る。
+    class="view" を全画面に付けておき、
+    class="active" が付いている画面だけ表示する（CSSで制御）。
+
+    これは現行コードの sg.Column(visible=True/False) と同じ考え方。
+-->
+
+<!-- メイン画面 -->
+<section id="view-main" class="view active">
+    <h1>開発部 備品管理システム</h1>
+    <div class="menu">
+        <button onclick="startBorrow()">貸出 / 返却 / 登録<br><small>Borrow / Return / Register</small></button>
+        <button onclick="showList('borrow')">貸出状況一覧を見る<br><small>View Current Borrowed Items</small></button>
+        <button onclick="showList('item')">登録されている物品一覧を見る<br><small>View Registered Items</small></button>
+        <button onclick="showList('return')">返却履歴一覧を見る<br><small>View Returned Items History</small></button>
+        <button onclick="showList('employee')">登録されている社員一覧を見る<br><small>View Registered Employees</small></button>
+        <button onclick="showList('bug')">不具合報告<br><small>Bug Reports</small></button>
+    </div>
+</section>
+
+<!-- NFC待機画面 -->
+<section id="view-nfc-wait" class="view">
+    <h2 id="nfc-prompt">カードをタッチしてください<br><small>Please touch your card</small></h2>
+    <div class="spinner"></div>
+    <button class="back-btn" onclick="switchView('main')">戻る / Back</button>
+</section>
+
+<!-- 確認画面 -->
+<section id="view-confirm" class="view">
+    <div id="confirm-message"></div>
+    <div class="confirm-buttons">
+        <button onclick="onConfirmYes()">はい / Yes</button>
+        <button onclick="onConfirmNo()">いいえ / No</button>
+    </div>
+</section>
+
+<!-- 返却日選択画面 -->
+<section id="view-calendar" class="view">
+    <h2>返却日を選択してください<br><small>Select return date</small></h2>
+    <div class="calendar-buttons">
+        <button onclick="selectDate('today')">今日まで<br><small>Until Today</small></button>
+        <button onclick="selectDate('tomorrow')">明日まで<br><small>Until Tomorrow</small></button>
+        <button onclick="openDatePicker()">カレンダーから選択<br><small>Select from Calendar</small></button>
+    </div>
+    <input type="date" id="date-picker" style="display:none">
+    <button class="back-btn" onclick="switchView('main')">戻る / Back</button>
+</section>
+
+<!-- 一覧表示画面 -->
+<section id="view-list" class="view">
+    <h2 id="list-title"></h2>
+    <div class="table-scroll" id="table-scroll" tabindex="0">
+        <table id="data-table">
+            <thead id="table-header"></thead>
+            <tbody id="table-body"></tbody>
+        </table>
+    </div>
+    <button class="back-btn" onclick="switchView('main')">戻る / Back</button>
+</section>
+
+<!-- 登録種別選択画面 -->
+<section id="view-register-select" class="view">
+    <h2>未登録のIDです。どちらを登録しますか？<br><small>Unregistered ID. Which type?</small></h2>
+    <button onclick="showRegisterForm('employee')">社員証として登録<br><small>Register as employee</small></button>
+    <button onclick="showRegisterForm('item')">物品として登録<br><small>Register as item</small></button>
+    <button class="back-btn" onclick="switchView('main')">戻る / Back</button>
+</section>
+
+<!-- 社員登録画面 -->
+<section id="view-register-employee" class="view">
+    <h2>新しい社員証を登録<br><small>Register new employee</small></h2>
+    <p>IDm: <span id="reg-emp-idm"></span></p>
+    <label>氏名 / Name:<br><input type="text" id="reg-emp-name"></label>
+    <label>Email:<br><input type="email" id="reg-emp-email"></label>
+    <button onclick="submitRegisterEmployee()">登録 / Register</button>
+    <button class="back-btn" onclick="switchView('register-select')">戻る / Back</button>
+</section>
+
+<!-- 物品登録画面 -->
+<section id="view-register-item" class="view">
+    <h2>新しい物品を登録<br><small>Register new item</small></h2>
+    <p>IDm: <span id="reg-item-idm"></span></p>
+    <label>物品名 / Item name:<br><input type="text" id="reg-item-name"></label>
+    <button onclick="submitRegisterItem()">登録 / Register</button>
+    <button class="back-btn" onclick="switchView('register-select')">戻る / Back</button>
+</section>
+
+<!-- 不具合報告画面 -->
+<section id="view-bug-report" class="view">
+    <h2>不具合報告<br><small>Bug Report</small></h2>
+    <div class="table-scroll" id="bug-table-scroll" tabindex="0">
+        <table id="bug-table">
+            <thead id="bug-table-header"></thead>
+            <tbody id="bug-table-body"></tbody>
+        </table>
+    </div>
+    <label>名前 / Your name:<br><input type="text" id="bug-reporter"></label>
+    <label>不具合内容 / Description:<br><textarea id="bug-description" rows="4"></textarea></label>
+    <button onclick="submitBugReport()">送信 / Submit</button>
+    <button class="back-btn" onclick="switchView('main')">戻る / Back</button>
+</section>
+
+<!-- 結果表示（貸出完了など） -->
+<section id="view-result" class="view">
+    <div id="result-message"></div>
+    <button onclick="switchView('main')">メインに戻る / Back to Main</button>
+</section>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

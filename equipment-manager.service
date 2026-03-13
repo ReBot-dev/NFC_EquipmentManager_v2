@@ -1,0 +1,15 @@
+[Unit]
+Description=Equipment Manager NFC Server
+After=network.target pcscd.service
+Wants=pcscd.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/home/khadas/New_NFCEM/backend
+ExecStart=/home/khadas/venv/bin/python -m uvicorn main:app --host 0.0.0.0 --port 8000
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
