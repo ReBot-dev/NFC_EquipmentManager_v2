@@ -1,14 +1,9 @@
-"""
-設定ファイル
+"""Configuration file. Edit these values for your environment."""
 
-ハードコードされていた値をここに集約する。
-VIM4にデプロイするときはここだけ変えればよい。
-"""
-
-# Google Sheets 設定
+# Google Sheets
 CREDENTIALS_FILE = "service_account.json"
 SPREADSHEET_NAME = "Equipment_Manager"
 
-# サーバー設定
+# Server
 HOST = "0.0.0.0"
 PORT = 8000

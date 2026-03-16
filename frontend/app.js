@@ -1,50 +1,51 @@
 /*
- * Equipment Manager - フロントエンド
- *
- * 状態機械（State Machine）で画面遷移を管理する。
- * 現行GUIコードの current_view と同じ考え方。
+ * Equipment Manager - Frontend
+ * Manages screen transitions using a state machine pattern.
  */
 
-// --- 状態管理 ---
-// 貸出フロー中に「1枚目のカード」「2枚目のカード」の情報を保持する
+// --- State ---
 const state = {
-    firstCard: null,   // { type: "employee"|"item", name: "...", idm: "..." }
+    firstCard: null,
     secondCard: null,
     unregisteredIdm: null,
 };
 
+// --- NFC variables ---
+let nfcCallback = null;
+let nfcEventSource = null;
+let nfcIgnoreIdm = null;
+
+// --- Confirm dialog callbacks ---
+let confirmYesCallback = null;
+let confirmNoCallback = null;
+
 
 // --------------------------------------------------
-// 画面切り替え（現行コードの return_to_main() に相当）
+// View switching
 // --------------------------------------------------
 
 function switchView(viewName) {
-    // NFC待機画面から離れるときはSSE接続を閉じる
     if (nfcEventSource && viewName !== 'nfc-wait') {
         nfcEventSource.close();
         nfcEventSource = null;
     }
 
-    // 全画面から active を外す
     document.querySelectorAll('.view').forEach(v => {
         v.classList.remove('active');
     });
-    // 指定した画面に active を付ける
     document.getElementById('view-' + viewName).classList.add('active');
 }
 
 
 // --------------------------------------------------
-// API呼び出しのヘルパー関数
+// API helpers
 // --------------------------------------------------
 
-// GETリクエスト（データ取得用）
 async function apiGet(url) {
     const response = await fetch(url);
     return response.json();
 }
 
-// POSTリクエスト（データ送信用）
 async function apiPost(url, data) {
     const response = await fetch(url, {
         method: 'POST',
@@ -56,10 +57,9 @@ async function apiPost(url, data) {
 
 
 // --------------------------------------------------
-// 一覧表示
+// List display
 // --------------------------------------------------
 
-// テーブルのヘッダーと対応するAPIのマッピング
 const LIST_CONFIG = {
     borrow: {
         title: '貸出状況一覧 / Current Borrowed Items',
@@ -89,7 +89,6 @@ const LIST_CONFIG = {
 };
 
 async function showList(type) {
-    // 不具合報告は専用画面を使う（フォーム付きなので）
     if (type === 'bug') {
         await showBugReport();
         return;
@@ -98,11 +97,9 @@ async function showList(type) {
     const config = LIST_CONFIG[type];
     document.getElementById('list-title').textContent = config.title;
 
-    // ヘッダーを作る
     const thead = document.getElementById('table-header');
     thead.innerHTML = '<tr>' + config.headers.map(h => `<th>${h}</th>`).join('') + '</tr>';
 
-    // APIからデータを取得してテーブルに表示
     const data = await apiGet(config.api);
     const tbody = document.getElementById('table-body');
 
@@ -117,7 +114,11 @@ async function showList(type) {
     switchView('list');
 }
 
-// 不具合報告画面（テーブル + フォーム）
+
+// --------------------------------------------------
+// Bug report
+// --------------------------------------------------
+
 async function showBugReport() {
     const config = LIST_CONFIG.bug;
 
@@ -135,7 +136,6 @@ async function showBugReport() {
         ).join('');
     }
 
-    // フォームをクリア
     document.getElementById('bug-reporter').value = '';
     document.getElementById('bug-description').value = '';
 
@@ -157,15 +157,7 @@ async function submitBugReport() {
 
 
 // --------------------------------------------------
-// 貸出/返却フロー
-//
-// 現行コードのフローをそのまま再現:
-// 1. カードタッチ → 社員 or 物品 を判定
-// 2. 社員なら「物品をタッチ」、物品なら「社員証をタッチ」
-// 3. 返却日を選んで貸出記録
-//
-// ※ Phase 2 で NFC の SSE を実装するまでは、
-//   手動でIDmを入力するテスト用UIを使う
+// Borrow / Return flow
 // --------------------------------------------------
 
 function startBorrow() {
@@ -174,67 +166,45 @@ function startBorrow() {
     waitForNfc('1枚目のカードをタッチしてください<br><small>Please touch your first card</small>', handleFirstCard);
 }
 
-// --------------------------------------------------
-// NFC待機（SSE で実際のNFCリーダーからイベントを受信する）
-//
-// 流れ:
-//   1. waitForNfc() が呼ばれる
-//   2. SSE接続を開く（/api/nfc/stream）
-//   3. NFCリーダーがカードを検出するまで待つ
-//   4. カードが検出されたら callback を呼ぶ
-//   5. SSE接続を閉じる
-// --------------------------------------------------
-
-let nfcCallback = null;
-let nfcEventSource = null;  // SSE接続を保持する変数
-let nfcIgnoreIdm = null;    // この IDm は無視する（1枚目と同じカードの再検知防止）
-
+// NFC waiting via SSE
 function waitForNfc(message, callback, ignoreIdm = null) {
     document.getElementById('nfc-prompt').innerHTML = message;
     nfcCallback = callback;
     nfcIgnoreIdm = ignoreIdm;
     switchView('nfc-wait');
 
-    // 前の接続が残っていたら閉じる
     if (nfcEventSource) {
         nfcEventSource.close();
     }
 
-    // SSE接続を開く
     nfcEventSource = new EventSource('/api/nfc/stream');
 
-    // カードが検出されたとき（サーバーからイベントが来たとき）
     nfcEventSource.onmessage = (event) => {
         const data = JSON.parse(event.data);
 
-        // 1枚目と同じカードならスルーする（まだリーダー上にある場合）
+        // Ignore same card as first scan (still on reader)
         if (nfcIgnoreIdm && data.idm === nfcIgnoreIdm) {
-            return;  // 無視して次のイベントを待つ
+            return;
         }
 
-        // 接続を閉じる（1回読み取ったら終了）
         nfcEventSource.close();
         nfcEventSource = null;
-        // コールバックを呼ぶ
         callback(data.idm);
     };
 
-    // エラー時（接続が切れた等）
     nfcEventSource.onerror = () => {
         nfcEventSource.close();
         nfcEventSource = null;
     };
 }
 
-
-// 1枚目のカード処理
+// First card handler
 async function handleFirstCard(idm) {
     const card = await apiGet('/api/identify/' + encodeURIComponent(idm));
 
     if (card.type === 'employee') {
         state.firstCard = { type: 'employee', name: card.name, idm: idm };
 
-        // この社員が借りている物品があるか確認
         const borrowed = await apiGet('/api/employee/' + encodeURIComponent(card.name) + '/borrowed');
         if (borrowed.length > 0) {
             let msg = `<strong>${card.name}</strong>さんの借用中物品:<br>`;
@@ -243,31 +213,27 @@ async function handleFirstCard(idm) {
             });
             msg += '<br>返却する場合は、初めに物品をタッチしてください。<br>追加で貸出登録しますか？';
             showConfirm(msg, () => {
-                // 「はい」→ 物品のNFC待機へ
                 waitForNfc('借りる物品をタッチしてください<br><small>Please touch the item</small>', handleSecondCard, state.firstCard.idm);
             }, () => {
-                // 「いいえ」→ メインに戻る
                 switchView('main');
             });
         } else {
             waitForNfc(
                 `社員証を確認: <strong>${card.name}</strong><br>借りる物品をタッチしてください<br><small>Please touch the item</small>`,
                 handleSecondCard,
-                state.firstCard.idm  // 1枚目のIDmを無視する
+                state.firstCard.idm
             );
         }
 
     } else if (card.type === 'item') {
         state.firstCard = { type: 'item', name: card.name, idm: idm };
 
-        // この物品が貸出中か確認
         const status = await apiGet('/api/item/' + encodeURIComponent(card.name) + '/status');
         if (status.borrowed) {
             showConfirm(
                 `<strong>${card.name}</strong>は貸出中です。返却しますか？<br>` +
                 `申請者: ${status.borrower}<br>返却予定日: ${status.return_date}`,
                 async () => {
-                    // 「はい」→ 返却処理
                     const result = await apiPost('/api/return', {
                         item_name: card.name,
                         borrower: status.borrower,
@@ -283,25 +249,22 @@ async function handleFirstCard(idm) {
             waitForNfc(
                 `物品を確認: <strong>${card.name}</strong><br>社員証をタッチしてください<br><small>Please touch your employee card</small>`,
                 handleSecondCard,
-                state.firstCard.idm  // 1枚目のIDmを無視する
+                state.firstCard.idm
             );
         }
 
     } else {
-        // 未登録
         state.unregisteredIdm = idm;
         switchView('register-select');
     }
 }
 
-// 2枚目のカード処理
+// Second card handler
 async function handleSecondCard(idm) {
     const card = await apiGet('/api/identify/' + encodeURIComponent(idm));
 
-    // 1枚目が社員なら、2枚目は物品でないとダメ
     if (state.firstCard.type === 'employee') {
         if (card.type === 'item') {
-            // 物品が貸出中か確認
             const status = await apiGet('/api/item/' + encodeURIComponent(card.name) + '/status');
             if (status.borrowed) {
                 showConfirm(
@@ -329,7 +292,6 @@ async function handleSecondCard(idm) {
             switchView('register-select');
         }
 
-    // 1枚目が物品なら、2枚目は社員でないとダメ
     } else if (state.firstCard.type === 'item') {
         if (card.type === 'employee') {
             state.secondCard = { type: 'employee', name: card.name, idm: idm };
@@ -346,11 +308,8 @@ async function handleSecondCard(idm) {
 
 
 // --------------------------------------------------
-// 確認ダイアログ
+// Confirm dialog
 // --------------------------------------------------
-
-let confirmYesCallback = null;
-let confirmNoCallback = null;
 
 function showConfirm(message, onYes, onNo) {
     document.getElementById('confirm-message').innerHTML = message;
@@ -369,16 +328,14 @@ function onConfirmNo() {
 
 
 // --------------------------------------------------
-// 返却日選択
+// Date selection
 // --------------------------------------------------
 
-// カレンダーボタンを押したら非表示のdate inputを開く
 function openDatePicker() {
     const picker = document.getElementById('date-picker');
     picker.style.display = 'block';
     picker.focus();
-    picker.showPicker();  // ブラウザのカレンダーUIを表示
-    // 日付が選ばれたら自動で登録
+    picker.showPicker();
     picker.onchange = () => {
         selectDate('custom');
         picker.style.display = 'none';
@@ -403,7 +360,6 @@ async function selectDate(type) {
         }
     }
 
-    // 社員名と物品名を state から取得
     const employeeName = state.firstCard.type === 'employee'
         ? state.firstCard.name
         : state.secondCard.name;
@@ -429,7 +385,7 @@ function formatDate(date) {
 
 
 // --------------------------------------------------
-// 登録処理
+// Registration
 // --------------------------------------------------
 
 function showRegisterForm(type) {
@@ -475,7 +431,7 @@ async function submitRegisterItem() {
 
 
 // --------------------------------------------------
-// 結果表示
+// Result display
 // --------------------------------------------------
 
 function showResult(message) {
@@ -485,33 +441,19 @@ function showResult(message) {
 
 
 // --------------------------------------------------
-// キーボードナビゲーション（矢印キー + Enter）
-//
-// 現行GUIの handle_common_events() と同じ考え方。
-// 今表示されている画面のボタン/入力欄を矢印キーで移動し、
-// Enter で「クリック」する。
-//
-// 仕組み:
-//   1. 現在の画面内のフォーカス可能な要素を取得
-//   2. 矢印キーで次/前の要素にフォーカスを移動
-//   3. Enter でフォーカス中の要素をクリック
-//   4. フォーカス中の要素を視覚的にハイライト（CSS）
+// Keyboard navigation (Arrow keys + Enter)
 // --------------------------------------------------
 
 document.addEventListener('keydown', (e) => {
-    // テキスト入力中・日付選択中は矢印キーを通常動作させる
     const activeEl = document.activeElement;
     const activeTag = activeEl.tagName;
     const isTyping = activeTag === 'INPUT' || activeTag === 'TEXTAREA' || activeTag === 'SELECT';
     const isDatePicker = activeTag === 'INPUT' && activeEl.type === 'date';
-
-    // テーブルスクロール領域にフォーカスがあるときは矢印でスクロール
     const isTableScroll = activeEl.classList.contains('table-scroll');
 
     if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
         if (isDatePicker) return;
         if (isTableScroll) {
-            // テーブル内を上下スクロール
             e.preventDefault();
             activeEl.scrollBy(0, e.key === 'ArrowDown' ? 60 : -60);
             return;
@@ -523,7 +465,6 @@ document.addEventListener('keydown', (e) => {
     if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
         if (isDatePicker) return;
         if (isTableScroll) {
-            // テーブルから抜けて前後のボタンへ移動
             e.preventDefault();
             moveFocus(e.key === 'ArrowRight' ? 1 : -1);
             return;
@@ -533,7 +474,6 @@ document.addEventListener('keydown', (e) => {
     }
 
     if (e.key === 'Enter') {
-        // 入力欄にいるときは次の要素にフォーカスを移動
         if (isTyping && !isDatePicker) {
             e.preventDefault();
             moveFocus(1);
@@ -547,31 +487,25 @@ document.addEventListener('keydown', (e) => {
         }
     }
 
-    // Escapeでメインに戻る
     if (e.key === 'Escape') {
         switchView('main');
     }
 });
 
 function moveFocus(direction) {
-    // 現在表示されている画面を取得
     const activeView = document.querySelector('.view.active');
     if (!activeView) return;
 
-    // その画面内のフォーカス可能な要素を取得
     const focusable = Array.from(
         activeView.querySelectorAll('button, input, textarea, select, [tabindex]')
     ).filter(el => !el.disabled && el.offsetParent !== null);
 
     if (focusable.length === 0) return;
 
-    // 現在フォーカスされている要素のインデックスを探す
     const currentIndex = focusable.indexOf(document.activeElement);
 
-    // 次のインデックスを計算（ループする）
     let nextIndex;
     if (currentIndex === -1) {
-        // どこにもフォーカスがなければ最初の要素へ
         nextIndex = 0;
     } else {
         nextIndex = (currentIndex + direction + focusable.length) % focusable.length;
@@ -580,25 +514,17 @@ function moveFocus(direction) {
     focusable[nextIndex].focus();
 }
 
-// 画面切り替え時に最初の要素にフォーカスを当てる
-// switchView を拡張
-const _originalSwitchView = switchView;
-// 注意: switchView は const ではなく function 宣言なので上書きできない
-// 代わりに MutationObserver でクラス変更を監視する
-
-// 画面が切り替わったら最初のボタンにフォーカスする
+// Auto-focus first element when view changes
 const observer = new MutationObserver(() => {
     const activeView = document.querySelector('.view.active');
     if (activeView) {
         const firstFocusable = activeView.querySelector('button, input, textarea');
         if (firstFocusable) {
-            // 少し遅らせてDOMの更新を待つ
             setTimeout(() => firstFocusable.focus(), 50);
         }
     }
 });
 
-// body の子要素のクラス変更を監視する
 observer.observe(document.body, {
     subtree: true,
     attributes: true,

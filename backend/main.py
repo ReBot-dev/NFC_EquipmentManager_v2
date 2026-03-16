@@ -1,8 +1,8 @@
 """
-FastAPI メインアプリケーション
+FastAPI application for Equipment Manager.
 
-ブラウザからのリクエストを受け取り、sheets.py に処理を委譲する。
-NFCカード検出はSSE（Server-Sent Events）でブラウザにリアルタイム通知する。
+Handles browser requests and delegates to sheets.py for data operations.
+NFC card detection is streamed to the browser via SSE (Server-Sent Events).
 """
 
 import asyncio
@@ -17,7 +17,7 @@ from config import CREDENTIALS_FILE, SPREADSHEET_NAME
 from sheets import SheetsManager
 from nfc_reader import NfcReader
 
-# --- アプリ初期化 ---
+# --- App initialization ---
 app = FastAPI()
 sheets = SheetsManager(CREDENTIALS_FILE, SPREADSHEET_NAME)
 nfc = NfcReader()
@@ -25,11 +25,11 @@ nfc = NfcReader()
 
 @app.on_event("startup")
 def startup():
-    """サーバー起動時にNFCリーダーの監視スレッドを開始する"""
+    """Start NFC reader monitoring thread on server startup."""
     nfc.start()
 
 
-# --- リクエストの「型」を定義する（Pydantic モデル） ---
+# --- Request models ---
 
 class EmployeeRegister(BaseModel):
     idm: str
@@ -55,54 +55,33 @@ class BugReport(BaseModel):
     description: str
 
 
-# --------------------------------------------------
-# SSE エンドポイント（NFC読み取りのリアルタイム通知）
-#
-# ブラウザ側:
-#   const es = new EventSource('/api/nfc/stream');
-#   es.onmessage = (e) => { console.log(e.data); };
-#
-# データの流れ:
-#   NFCスレッド → Queue → このエンドポイント → SSE → ブラウザ
-# --------------------------------------------------
+# --- SSE endpoint (NFC real-time notification) ---
 
 @app.get("/api/nfc/start")
 def nfc_start_listening():
-    """ブラウザが「カード待ち画面」に入ったときに呼ぶ"""
+    """Called when browser enters card-waiting screen."""
     nfc.set_listening(True)
     return {"status": "listening"}
 
 
 @app.get("/api/nfc/stop")
 def nfc_stop_listening():
-    """ブラウザが「カード待ち画面」を離れたときに呼ぶ"""
+    """Called when browser leaves card-waiting screen."""
     nfc.set_listening(False)
     return {"status": "stopped"}
 
 
 @app.get("/api/nfc/stream")
 async def nfc_stream():
-    """
-    SSEエンドポイント: NFCカードが検出されるたびにイベントを送信する。
-
-    SSEのデータ形式:
-      data: {"idm": "AB CD EF 12"}\n\n
-
-    「data:」で始まる行がイベントデータ。
-    最後に空行2つ(\n\n)で1イベントの終わりを示す。
-    これはSSEの仕様（RFC）で決まっているフォーマット。
-    """
+    """SSE endpoint: sends an event each time an NFC card is detected."""
     async def event_generator():
         nfc.set_listening(True)
         try:
             while True:
                 try:
-                    # 最大30秒待つ。タイムアウトしたらキープアライブを送る
                     idm = await asyncio.wait_for(nfc.wait_for_card(), timeout=30.0)
                     yield f"data: {json.dumps({'idm': idm})}\n\n"
                 except asyncio.TimeoutError:
-                    # キープアライブ（接続が切れていないか確認）
-                    # コロン始まりはSSEのコメント（ブラウザは無視する）
                     yield ": keepalive\n\n"
         finally:
             nfc.set_listening(False)
@@ -111,88 +90,76 @@ async def nfc_stream():
         event_generator(),
         media_type="text/event-stream",
         headers={
-            "Cache-Control": "no-cache",    # キャッシュしない
-            "Connection": "keep-alive",      # 接続を維持する
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
         },
     )
 
 
-# --------------------------------------------------
-# GET エンドポイント（データ取得）
-# --------------------------------------------------
+# --- GET endpoints ---
 
 @app.get("/api/borrow_list")
 def get_borrow_list():
-    """貸出中一覧を返す"""
     return sheets.get_borrow_list()
 
 
 @app.get("/api/return_list")
 def get_return_list():
-    """返却履歴を返す"""
     return sheets.get_return_list()
 
 
 @app.get("/api/employee_list")
 def get_employee_list():
-    """社員一覧を返す"""
     return sheets.get_employee_list()
 
 
 @app.get("/api/item_list")
 def get_item_list():
-    """物品一覧を返す"""
     return sheets.get_item_list()
 
 
 @app.get("/api/bug_list")
 def get_bug_list():
-    """不具合報告一覧を返す"""
     return sheets.get_bug_list()
 
 
 @app.get("/api/identify/{idm}")
 def identify_card(idm: str):
-    """NFCカードのIDmから社員/物品を判定する"""
+    """Identify an NFC card as employee/item/unknown."""
     return sheets.identify_card(idm)
 
 
 @app.get("/api/employee/{name}/borrowed")
 def get_employee_borrowed(name: str):
-    """指定社員が現在借りている物品一覧"""
+    """Get items currently borrowed by an employee."""
     return sheets.get_employee_borrowed_items(name)
 
 
 @app.get("/api/item/{item_name}/status")
 def get_item_status(item_name: str):
-    """物品の貸出状態を確認する"""
+    """Check if an item is currently borrowed."""
     result = sheets.is_item_borrowed(item_name)
     if result:
         return {"borrowed": True, **result}
     return {"borrowed": False}
 
 
-# --------------------------------------------------
-# POST エンドポイント（データ書き込み）
-# --------------------------------------------------
+# --- POST endpoints ---
 
 @app.post("/api/register/employee")
 def register_employee(data: EmployeeRegister):
-    """新しい社員を登録する"""
     sheets.register_employee(data.idm, data.name, data.email)
     return {"status": "ok", "message": f"{data.name}の登録が完了しました"}
 
 
 @app.post("/api/register/item")
 def register_item(data: ItemRegister):
-    """新しい物品を登録する"""
     sheets.register_item(data.idm, data.item_name)
     return {"status": "ok", "message": f"{data.item_name}の登録が完了しました"}
 
 
 @app.post("/api/borrow")
 def submit_borrow(data: BorrowRequest):
-    """貸出を記録する"""
     sheets.submit_borrow(data.employee_name, data.item_name, data.return_date)
     return {
         "status": "ok",
@@ -202,26 +169,21 @@ def submit_borrow(data: BorrowRequest):
 
 @app.post("/api/return")
 def return_item(data: ReturnRequest):
-    """返却を処理する"""
     sheets.return_item(data.item_name, data.borrower, data.scheduled_date)
     return {"status": "ok", "message": f"{data.item_name}の返却が完了しました"}
 
 
 @app.post("/api/bug_report")
 def submit_bug_report(data: BugReport):
-    """不具合報告を送信する"""
     sheets.submit_bug_report(data.reporter, data.description)
     return {"status": "ok", "message": "不具合報告を受け付けました"}
 
 
-# --------------------------------------------------
-# フロントエンド配信
-# --------------------------------------------------
+# --- Frontend serving ---
 
 app.mount("/static", StaticFiles(directory="../frontend"), name="static")
 
 
 @app.get("/")
 def serve_frontend():
-    """トップページ（index.html）を返す"""
     return FileResponse("../frontend/index.html")

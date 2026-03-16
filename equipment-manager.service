@@ -5,9 +5,11 @@ Wants=pcscd.service
 
 [Service]
 Type=simple
+# Root is required for NFC reader access (or configure udev rules instead)
 User=root
-WorkingDirectory=/home/khadas/New_NFCEM/backend
-ExecStart=/home/khadas/venv/bin/python -m uvicorn main:app --host 0.0.0.0 --port 8000
+# Update these paths to match your installation
+WorkingDirectory=/home/khadas/Equipment_Manager_v2/backend
+ExecStart=/home/khadas/Equipment_Manager_v2/venv/bin/python -m uvicorn main:app --host 0.0.0.0 --port 8000
 Restart=always
 RestartSec=5
 

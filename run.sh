@@ -1,14 +1,14 @@
 #!/bin/bash
 
-# Equipment Manager 起動スクリプト
-# 使い方: ./run.sh
+# Start the Equipment Manager server.
+# Usage: ./run.sh
+#
+# Requires a Python virtual environment at ./venv with fastapi, uvicorn, etc.
+# Create one with: python3 -m venv venv && source venv/bin/activate && pip install -r requirements.txt
 
-# このスクリプトがあるフォルダに移動
-cd "$(dirname "$0")"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-# 仮想環境を有効化
-source /home/khadas/venv/bin/activate
+source "$SCRIPT_DIR/venv/bin/activate"
 
-# バックエンドフォルダに移動して起動
-cd backend
-python -m uvicorn main:app --reload --host 0.0.0.0 --port 8000
+cd "$SCRIPT_DIR/backend"
+python -m uvicorn main:app --host 0.0.0.0 --port 8000
